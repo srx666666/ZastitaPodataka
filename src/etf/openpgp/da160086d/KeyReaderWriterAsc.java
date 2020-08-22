@@ -1,14 +1,20 @@
 package etf.openpgp.da160086d;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
+import java.io.OutputStream;
 
 import org.bouncycastle.openpgp.PGPException;
+import org.bouncycastle.openpgp.PGPPublicKey;
+import org.bouncycastle.openpgp.PGPPublicKeyRing;
 import org.bouncycastle.openpgp.PGPPublicKeyRingCollection;
+import org.bouncycastle.openpgp.PGPSecretKey;
 import org.bouncycastle.openpgp.PGPSecretKeyRing;
 import org.bouncycastle.openpgp.PGPSecretKeyRingCollection;
 import org.bouncycastle.openpgp.PGPUtil;
@@ -25,16 +31,73 @@ public class KeyReaderWriterAsc {
 		keyGenHelper = kgh;
 	}
 	
-	public void Read(String filePath) throws IOException, PGPException
+	public void ReadPrivate(String filePath) throws IOException, PGPException
 	{
 		File file = new File(filePath);
 		InputStream is = new FileInputStream(file);
 		
-		PGPSecretKeyRingCollection pgpSec = 
-				new PGPSecretKeyRingCollection( PGPUtil.getDecoderStream( is ), new JcaKeyFingerprintCalculator() );
+		PGPSecretKeyRing keyRing = 
+				new PGPSecretKeyRing( PGPUtil.getDecoderStream( is ), new JcaKeyFingerprintCalculator() );
 		
-		java.util.Iterator<PGPSecretKeyRing> keyRingIter = pgpSec.getKeyRings();
-		PGPSecretKeyRing keyRing = ( PGPSecretKeyRing ) keyRingIter.next();
-		keyGenHelper.AddAndSaveAllSecrets(keyRing);
+		keyGenHelper.AddAndSavePrivateSecrets(keyRing);
+	}
+	
+	public void ReadPublic(String filePath) throws IOException, PGPException
+	{
+		File file = new File(filePath);
+		InputStream is = new FileInputStream(file);
+		
+		PGPPublicKeyRing keyRing = 
+				new PGPPublicKeyRing( PGPUtil.getDecoderStream( is ), new JcaKeyFingerprintCalculator() );
+		
+		keyGenHelper.AddAndSavePublicSecrets(keyRing);
+	}
+	
+	public boolean WritePublic(String filePath, long id) throws IOException
+	{
+		PGPPublicKeyRing keyRing = keyGenHelper.GetPublicKeyById(id);
+		if (keyRing == null)
+		{
+			keyGenHelper.writeMessage("Trazeni kljuc ne postoji");
+			return false;
+		}
+		
+    	ByteArrayOutputStream secretOut = new ByteArrayOutputStream();
+		keyRing.encode(secretOut);
+		secretOut.close();
+		
+    	File secretsFile = new File(filePath);
+		if (secretsFile.exists())
+			secretsFile.delete();
+		
+		try(OutputStream outputStream = new FileOutputStream(filePath)) {
+		    secretOut.writeTo(outputStream);
+		}
+		
+		return true;
+	}
+	
+	public boolean WritePrivate(String filePath, long id) throws IOException
+	{
+		PGPSecretKeyRing keyRing = keyGenHelper.GetPrivateKeyById(id);
+		if (keyRing == null)
+		{
+			keyGenHelper.writeMessage("Trazeni kljuc ne postoji");
+			return false;
+		}
+		
+    	ByteArrayOutputStream secretOut = new ByteArrayOutputStream();
+		keyRing.encode(secretOut);
+		secretOut.close();
+		
+    	File secretsFile = new File(filePath);
+		if (secretsFile.exists())
+			secretsFile.delete();
+		
+		try(OutputStream outputStream = new FileOutputStream(filePath)) {
+		    secretOut.writeTo(outputStream);
+		}
+		
+		return true;
 	}
 }

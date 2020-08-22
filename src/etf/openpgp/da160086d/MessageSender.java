@@ -53,6 +53,9 @@ import org.bouncycastle.util.Arrays.Iterator;
 public class MessageSender {
 	
 	private KeyGeneratorHelper keyGenHelper;
+	private byte[] allBytes;
+	private String currentSourceFilePath, currentTargetFilePath;
+	private PGPPublicKeyEncryptedData pbe;
 
 	MessageSender(KeyGeneratorHelper kgh)
 	{
@@ -62,7 +65,7 @@ public class MessageSender {
 	public void sendMessage(String sourceFilePath, String targetFilePath, PGPPublicKey[] encryptionKeys, long keySignId, char[] pass,
 			boolean encrypt, boolean sign, boolean zip, boolean toRadix, int encryptionAlgorithm) throws PGPException, IOException
 	{
-		byte[] allBytes = null;
+		allBytes = null;
         
         // sign
         //
@@ -193,8 +196,10 @@ public class MessageSender {
 	
 	public void receiveMessage(String sourceFilePath, String targetFilePath, boolean radix64) throws IOException, PGPException
 	{
-		byte[] allBytes = null;
-		int maxByteSize = 0;
+		currentSourceFilePath = sourceFilePath;
+		currentTargetFilePath = targetFilePath;
+		allBytes = null;
+		int maxByteSize = 1000;
 		try (InputStream inputStream = new FileInputStream(sourceFilePath);) 
         {
             long fileSize = new File(sourceFilePath).length();
@@ -247,7 +252,7 @@ public class MessageSender {
 		    enc = (PGPEncryptedDataList) o;
 			java.util.Iterator<PGPEncryptedData> it = enc.getEncryptedDataObjects();
 		    PGPPrivateKey sKey = null;
-		    PGPPublicKeyEncryptedData pbe = null;
+		    pbe = null;
 		    while (sKey == null && it.hasNext())
 		    {
 		        pbe = (PGPPublicKeyEncryptedData) it.next();
@@ -258,32 +263,9 @@ public class MessageSender {
 	            	java.util.Iterator<PGPSecretKey> iterPriv = keyRing.getSecretKeys();
 	            	PGPSecretKey masterKey = iterPriv.next();
 	            	PGPSecretKey secretKey = iterPriv.next();
-	            	PasswordWindow passWindow = new PasswordWindow("Unesite sifru", pbe.getKeyID(), keyGenHelper, false);
+	            	PasswordWindow passWindow = new PasswordWindow("Unesite sifru", pbe.getKeyID(), keyGenHelper, false, this);
 	            	passWindow.setVisible(true);
-			        PGPPrivateKey privateKey = passWindow.GetPrivateKey();
-			        if (privateKey == null)
-			        {
-			        	keyGenHelper.writeMessage("Potpis nije propisno unesen");
-			        }
-			        PublicKeyDataDecryptorFactory dataDecryptorFactory = new JcePublicKeyDataDecryptorFactoryBuilder().setProvider("BC").build(privateKey);
-	                InputStream inputStream = pbe.getDataStream(dataDecryptorFactory);
-	                allBytes = inputStream.readAllBytes();
-	                
-	                inputStream.close();
-	                
-	                objectFactory = new JcaPGPObjectFactory(allBytes);
-	    			o = null;
-	    			try
-	    			{
-	    				o = objectFactory.nextObject();
-	    			}
-	    			catch (Exception e)
-	    			{
-	    				OutputStream outputStream = new FileOutputStream(targetFilePath);
-	    	        	outputStream.write(allBytes);
-	    	        	
-	    	        	return;
-	    			}
+	            	return;
 	            }
 	            else
 	            {
@@ -375,6 +357,119 @@ public class MessageSender {
 			bytesToWrite = literalData.getInputStream().readAllBytes();
 			
 			OutputStream outputStream = new FileOutputStream(targetFilePath);
+        	outputStream.write(bytesToWrite);
+		}
+	}
+	
+	public void continueWithDecryption(PGPPrivateKey privateKey) throws PGPException, IOException
+	{
+		int maxByteSize = 1000;
+		if (privateKey == null)
+        {
+        	keyGenHelper.writeMessage("Potpis nije propisno unesen");
+        }
+        PublicKeyDataDecryptorFactory dataDecryptorFactory = new JcePublicKeyDataDecryptorFactoryBuilder().setProvider("BC").build(privateKey);
+        InputStream inputStream = pbe.getDataStream(dataDecryptorFactory);
+        allBytes = inputStream.readAllBytes();
+        
+        inputStream.close();
+        
+        PGPObjectFactory objectFactory = new JcaPGPObjectFactory(allBytes);
+		Object o = null;
+		try
+		{
+			o = objectFactory.nextObject();
+		}
+		catch (Exception e)
+		{
+			OutputStream outputStream = new FileOutputStream(currentTargetFilePath);
+        	outputStream.write(allBytes);
+        	
+        	return;
+		}
+		
+		if (o instanceof PGPCompressedData) 
+		{
+			try
+			{
+				inputStream = ((PGPCompressedData)o).getDataStream();
+				allBytes = inputStream.readAllBytes();
+				
+				inputStream.close();
+			}
+			catch (PGPException e)
+			{
+				keyGenHelper.writeMessage("Greska prilikom dekompresije.");
+				return;
+			}
+			objectFactory = new JcaPGPObjectFactory(allBytes);
+			o = null;
+			try
+			{
+				o = objectFactory.nextObject();
+			}
+			catch (Exception e)
+			{
+				OutputStream outputStream = new FileOutputStream(currentTargetFilePath);
+	        	outputStream.write(allBytes);
+	        	
+	        	return;
+			}
+		}
+		
+		if (o instanceof PGPOnePassSignatureList) 
+		{
+			PGPOnePassSignatureList onePassSignatureList = (PGPOnePassSignatureList) o;
+            PGPOnePassSignature onePassSignature = onePassSignatureList.get(0);
+
+            long keyId = onePassSignature.getKeyID();
+            PGPPublicKeyRing keyRing = keyGenHelper.GetPublicMasterKeyById(keyId);
+            PGPPublicKey publicKey = null;
+            if (keyRing != null)
+            {
+            	java.util.Iterator<PGPPublicKey> iterPublic = keyRing.getPublicKeys();
+        		publicKey = iterPublic.next();
+            }
+            else
+            {
+            	keyGenHelper.writeMessage("Nije pronadjen kljuc za verifikaciju potpisa.");
+            	return;
+            }
+            
+            PGPLiteralData literalData = (PGPLiteralData) objectFactory.nextObject();
+            
+            onePassSignature.init(new JcaPGPContentVerifierBuilderProvider().setProvider("BC"), publicKey);
+
+            byte[] verificationBytes = new byte[maxByteSize];
+            verificationBytes = literalData.getInputStream().readAllBytes();
+            byte[] outputBytes = verificationBytes.clone();
+            
+            for (int i= 0; i< verificationBytes.length; i++) {
+                onePassSignature.update(verificationBytes[i]);
+            }
+
+            PGPSignatureList signatureList = (PGPSignatureList) objectFactory.nextObject();
+            PGPSignature signature = signatureList.get(0);
+
+            if (onePassSignature.verify(signature)) {
+            	keyGenHelper.writeMessage("Primljena poruka od:"+publicKey.getUserIDs().next());
+            }
+            else
+            {
+            	keyGenHelper.writeMessage("Verifikacija potpisa neuspesna");
+            	return;
+            }
+            
+            OutputStream outputStream = new FileOutputStream(currentTargetFilePath);
+        	outputStream.write(outputBytes);
+		}
+		else
+		{
+			PGPLiteralData literalData = (PGPLiteralData) o;
+			byte[] bytesToWrite = new byte[maxByteSize];
+			bytesToWrite = literalData.getInputStream().readAllBytes();
+			
+			OutputStream outputStream = new FileOutputStream(currentTargetFilePath);
         	outputStream.write(bytesToWrite);
 		}
 	}

@@ -3,6 +3,7 @@ package etf.openpgp.da160086d;
 import java.awt.GridLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.IOException;
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -11,6 +12,7 @@ import javax.swing.JTextField;
 
 import org.bouncycastle.openpgp.PGPException;
 import org.bouncycastle.openpgp.PGPPrivateKey;
+import org.bouncycastle.openpgp.PGPSecretKey;
 import org.bouncycastle.openpgp.PGPSecretKeyRing;
 import org.bouncycastle.openpgp.operator.jcajce.JcePBESecretKeyDecryptorBuilder;
 
@@ -23,7 +25,7 @@ public class PasswordWindow extends JFrame{
 	private boolean delete;
 	private PGPPrivateKey privateKey = null;
 	
-	public PasswordWindow(String name, long id, KeyGeneratorHelper kgh, boolean del) {
+	public PasswordWindow(String name, long id, KeyGeneratorHelper kgh, boolean del, MessageSender msgSender) {
 		super(name);
 		this.delete = del;
 		secretKeyRing = kgh.GetPrivateKeyById(id);
@@ -53,7 +55,10 @@ public class PasswordWindow extends JFrame{
             public void actionPerformed(ActionEvent e){
             	privateKey = null;
 				try {
-					privateKey = secretKeyRing.getSecretKey().extractPrivateKey(new JcePBESecretKeyDecryptorBuilder()
+					java.util.Iterator<PGPSecretKey> iterPriv = secretKeyRing.getSecretKeys();
+	            	PGPSecretKey masterKey = iterPriv.next();
+	            	PGPSecretKey secretKey = iterPriv.next();
+					privateKey = secretKey.extractPrivateKey(new JcePBESecretKeyDecryptorBuilder()
 							.setProvider("BC").build(fieldPass.getText().toCharArray()));
 				} catch (PGPException e2) {
 					kgh.writeMessage("Pogresna lozinka");
@@ -66,24 +71,20 @@ public class PasswordWindow extends JFrame{
 						e1.printStackTrace();
 					}
             	 }
+            	 if (!delete)
+            	 {
+            		 try {
+						msgSender.continueWithDecryption(privateKey);
+					} catch (PGPException e1) {
+						kgh.writeMessage("Doslo je do greske vezano sa PGP protokolom");
+						e1.printStackTrace();
+					} catch (IOException e1) {
+						kgh.writeMessage("Doslo je do neocekivane greske prilikom rada sa fajlom.");
+						e1.printStackTrace();
+					}
+            	 }
             	 dispose();
             }
         });
-	}
-	
-	
-	public PGPPrivateKey GetPrivateKey()
-	{
-		for (int i=0;i< 30;i++)
-		{
-			try {
-				Thread.sleep(1000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-			if (privateKey!=null)
-				break;
-		}
-		return privateKey;
 	}
 }

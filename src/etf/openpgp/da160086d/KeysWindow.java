@@ -118,7 +118,7 @@ public class KeysWindow extends JFrame{
    							kgh.writeMessage("Format keyId za brisanje mora biti broj.");
    							return;
    							} 
-	    				   PasswordWindow passw = new PasswordWindow("Lozinka za kljuc", id,keyGenHelper, true);
+	    				   PasswordWindow passw = new PasswordWindow("Lozinka za kljuc", id,keyGenHelper, true, null);
 	    				   passw.setVisible(true);   //proveri kako da posaljes koji tacno kljuc hoces da obrises
     				   }
     				   if (publicKeys.isSelected())
